@@ -104,26 +104,38 @@ class Bilinear(Hysteresis):
 
 class Takeda(Hysteresis):
     """
-    Takeda-like Model (Peak Oriented).
+    Takeda-like Model with proper unloading stiffness.
     Suitable for RC members.
-    Degrades stiffness based on max historical deformation.
+    
+    Key features:
+    - Unloading stiffness starts at K0 and degrades with ductility
+    - State tracking to prevent chattering in Newton-Raphson
+    - Origin-oriented reloading after unloading
     """
-    def __init__(self, k0: float, fy: float, r: float):
+    
+    # State constants
+    STATE_LOADING_POS = 1   # Loading toward positive
+    STATE_LOADING_NEG = 2   # Loading toward negative  
+    STATE_UNLOADING = 3     # Unloading (returning toward origin)
+    
+    def __init__(self, k0: float, fy: float, r: float, alpha: float = 0.4):
         """
         Initialize Takeda hysteresis model.
         
         Args:
             k0: Initial stiffness
             fy: Yield force  
-            r: Post-yield stiffness ratio
+            r: Post-yield stiffness ratio (typically 0.01-0.1)
+            alpha: Unloading stiffness degradation exponent (typically 0.3-0.5)
         """
         super().__init__(k0)
         self.fy = fy
         self.r = r
         self.kp = k0 * r
         self.dy = fy / k0
+        self.alpha = alpha  # Degradation exponent
         
-        # History
+        # History (peaks)
         self.d_max = self.dy     # Max disp in positive
         self.d_min = -self.dy    # Max disp in negative
         
@@ -131,88 +143,182 @@ class Takeda(Hysteresis):
         self.d_max_commit = self.dy
         self.d_min_commit = -self.dy
         
+        # State tracking to prevent chattering
+        self.state = self.STATE_LOADING_POS
+        self.state_commit = self.STATE_LOADING_POS
+        
+        # Reversal point (where unloading started)
+        self.u_reversal = 0.0
+        self.f_reversal = 0.0
+        self.u_reversal_commit = 0.0
+        self.f_reversal_commit = 0.0
+        
+    def _get_unloading_stiffness(self, d_max_abs: float) -> float:
+        """
+        Calculate unloading stiffness using Takeda degradation formula.
+        K_unload = K0 * (dy / d_max)^alpha
+        """
+        if d_max_abs < self.dy:
+            return self.k0
+        
+        # Takeda degradation: K_un = K0 * (dy / d_max)^alpha
+        k_un = self.k0 * (self.dy / d_max_abs) ** self.alpha
+        
+        # Bound: at least post-yield stiffness, at most K0
+        k_un = max(k_un, self.kp)
+        k_un = min(k_un, self.k0)
+        
+        return k_un
+        
     def _calculate_trial_state(self):
         u = self.trial_disp
         d_max = self.d_max_commit
         d_min = self.d_min_commit
         
-        # Envelope Functions
+        # Envelope forces
         f_pos_env = self.fy + self.kp * (u - self.dy)
         f_neg_env = -self.fy + self.kp * (u + self.dy)
         
-        # 1. Check Envelopes
+        # Determine displacement direction
+        delta_u = u - self.disp
+        
+        # Small displacement threshold
+        if abs(delta_u) < 1e-12:
+            self.trial_force = self.force
+            self.trial_tangent = self.tangent
+            return
+        
+        moving_positive = delta_u > 0
+        
+        # ============================================
+        # 1. Check if hitting envelope
+        # ============================================
         if u >= d_max:
             # Pushing positive envelope
             self.trial_force = f_pos_env
             self.trial_tangent = self.kp
+            self.state = self.STATE_LOADING_POS
+            self.u_reversal = u
+            self.f_reversal = self.trial_force
             return
             
         if u <= d_min:
             # Pushing negative envelope
             self.trial_force = f_neg_env
             self.trial_tangent = self.kp
+            self.state = self.STATE_LOADING_NEG
+            self.u_reversal = u
+            self.f_reversal = self.trial_force
             return
-            
-        # 2. Inside Loop (Unloading / Reloading)
-        # Determine Target
-        # If u > u_last_commit: Moving Positive -> Target d_max
-        # If u < u_last_commit: Moving Negative -> Target d_min
         
-        # Edge case: No displacement change - maintain current state
-        # Keep tangent consistent with current position
-        if abs(u - self.disp) < 1e-12:
-            self.trial_force = self.force
-            # Maintain tangent based on current position relative to envelope
-            if u >= d_max - 1e-12:
-                self.trial_tangent = self.kp  # On positive envelope
-            elif u <= d_min + 1e-12:
-                self.trial_tangent = self.kp  # On negative envelope
-            else:
-                self.trial_tangent = self.tangent  # Keep current tangent
-            return
+        # ============================================
+        # 2. Inside loop: State-based behavior
+        # ============================================
+        
+        # Detect reversal (change of direction)
+        was_loading_pos = self.state_commit == self.STATE_LOADING_POS
+        was_loading_neg = self.state_commit == self.STATE_LOADING_NEG
+        was_unloading = self.state_commit == self.STATE_UNLOADING
+        
+        # Check for reversal
+        if was_loading_pos and not moving_positive:
+            # Reversal from positive loading -> start unloading
+            self.state = self.STATE_UNLOADING
+            self.u_reversal = self.disp
+            self.f_reversal = self.force
             
-        if u > self.disp:
-            # Target: Positive Peak
+        elif was_loading_neg and moving_positive:
+            # Reversal from negative loading -> start unloading
+            self.state = self.STATE_UNLOADING
+            self.u_reversal = self.disp
+            self.f_reversal = self.force
+            
+        elif was_unloading:
+            # Continue unloading until we cross origin or re-reverse
+            # Check if we've crossed the force=0 line
+            if self.force > 0 and not moving_positive:
+                # Still unloading from positive side
+                self.state = self.STATE_UNLOADING
+            elif self.force < 0 and moving_positive:
+                # Still unloading from negative side
+                self.state = self.STATE_UNLOADING
+            elif self.force > 0 and moving_positive:
+                # Re-loading toward positive
+                self.state = self.STATE_LOADING_POS
+            elif self.force < 0 and not moving_positive:
+                # Re-loading toward negative
+                self.state = self.STATE_LOADING_NEG
+            else:
+                self.state = self.STATE_UNLOADING
+        else:
+            # Default behavior
+            if moving_positive:
+                self.state = self.STATE_LOADING_POS
+            else:
+                self.state = self.STATE_LOADING_NEG
+        
+        # ============================================
+        # 3. Calculate force based on state
+        # ============================================
+        
+        if self.state == self.STATE_UNLOADING:
+            # UNLOADING: Use degraded initial stiffness (NOT secant stiffness)
+            # This is the key fix - unloading is "stiff" like K0
+            d_max_abs = max(abs(d_max), abs(d_min))
+            k_un = self._get_unloading_stiffness(d_max_abs)
+            
+            # Calculate force from reversal point
+            self.trial_force = self.f_reversal + k_un * (u - self.u_reversal)
+            self.trial_tangent = k_un
+            
+            # Check if force crossed zero (origin crossing)
+            if (self.f_reversal > 0 and self.trial_force < 0) or \
+               (self.f_reversal < 0 and self.trial_force > 0):
+                # Crossed origin - transition to reloading toward opposite peak
+                if moving_positive:
+                    self.state = self.STATE_LOADING_POS
+                else:
+                    self.state = self.STATE_LOADING_NEG
+                    
+        if self.state == self.STATE_LOADING_POS:
+            # RELOADING toward positive peak
+            # Draw line from origin (or near it) to positive peak
             target_u = d_max
             target_f = self.fy + self.kp * (d_max - self.dy)
-        else:
-            # Target: Negative Peak
+            
+            # Secant stiffness from origin to peak
+            k_reload = target_f / target_u if abs(target_u) > 1e-9 else self.k0
+            k_reload = max(k_reload, self.kp)  # At least post-yield
+            k_reload = min(k_reload, self.k0)  # At most initial
+            
+            self.trial_force = k_reload * u
+            self.trial_tangent = k_reload
+            
+        elif self.state == self.STATE_LOADING_NEG:
+            # RELOADING toward negative peak
             target_u = d_min
             target_f = -self.fy + self.kp * (d_min + self.dy)
             
-        # Secant stiffness to target
-        # K = (F_target - F_current) / (u_target - u_current)
-        # NOTE: Using F_current (committed) and u_current (committed).
-        
-        delta_u = target_u - self.disp
-        if abs(delta_u) < 1e-9:
-            # Already at target? Should have been caught by Envelope check
-            k_sec = self.kp
-        else:
-            k_sec = (target_f - self.force) / delta_u
+            k_reload = target_f / target_u if abs(target_u) > 1e-9 else self.k0
+            k_reload = max(abs(k_reload), self.kp)
+            k_reload = min(k_reload, self.k0)
             
-        # Robustness: Stiffness should not be negative usually (unless softening)
-        # And usually >= kp for Takeda
-        if k_sec < self.kp: k_sec = self.kp
+            self.trial_force = -k_reload * abs(u)
+            self.trial_tangent = k_reload
         
-        # Upper bound to prevent extreme stiffness (max 10x initial stiffness)
-        k_sec = min(k_sec, self.k0 * 10)
+        # ============================================
+        # 4. Bound checks
+        # ============================================
         
-        # Use Large stiffness if unloading just started? 
-        # Takeda unloading is K_un = K0 * (dy/dm)^alpha
-        # Peak oriented simplifies unloading to point directly at opposite peak? 
-        # No, that's "Origin Oriented" or specific "Peak Oriented".
-        # Standard Takeda: Unloads with K_un, then aims at opposite crossing point.
+        # Don't exceed envelope
+        self.trial_force = min(self.trial_force, f_pos_env)
+        self.trial_force = max(self.trial_force, f_neg_env)
         
-        # For this implementation, "Peak Oriented" is the most robust simple degrading model.
-        # It always aims at the peak.
-        
-        self.trial_tangent = k_sec
-        self.trial_force = self.force + k_sec * (u - self.disp)
-        
-        # Bound force to prevent extreme values (max 10x yield force)
+        # Sanity bounds
         max_force = self.fy * 10
         self.trial_force = np.clip(self.trial_force, -max_force, max_force)
+        self.trial_tangent = max(self.trial_tangent, self.kp)
+        self.trial_tangent = min(self.trial_tangent, self.k0 * 2)
             
     def _commit_history(self):
         # Update d_max/d_min
@@ -220,3 +326,8 @@ class Takeda(Hysteresis):
             self.d_max_commit = self.disp
         if self.disp < self.d_min_commit:
             self.d_min_commit = self.disp
+        
+        # Commit state
+        self.state_commit = self.state
+        self.u_reversal_commit = self.u_reversal
+        self.f_reversal_commit = self.f_reversal

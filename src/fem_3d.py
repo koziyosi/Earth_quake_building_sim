@@ -168,46 +168,27 @@ class BeamColumn3D(Element3D):
             zy = D
             
         else:
-            # Vertical element (Parallel to Z)
-            # If cz = 1 (up), x' = (0,0,1).
-            # Choose global Y as y'? 
-            # Standard: if Vertical, let local y' be global Y? or -X?
-            # Let's pick: x'=(0,0,1). z' = Y (0,1,0). y' = z' x x' = (1, 0, 0).
-            # So local y is global X.
-            if cz > 0:
-                # Upward
-                xz = 0; yz = 1; zz = 0 # z' is Global Y
-                xy = -1; yy = 0; zy = 0 # y' is Global -X ?
-                # check: z' x x' = (0,1,0) x (0,0,1) = (1,0,0) -> Global X.
-                # So y' should be Global X?
-                # My logic: y' = z' x x'.
-                pass
-                
-            # Let's use simplified logic:
-            if cz > 0: # +Z
-               xy = 0; yy = 1; zy = 0  # y' is global Y?
-               xz = -1; yz = 0; zz = 0 # z' is global -X?
-            else: # -Z
-               xy = 0; yy = 1; zy = 0
-               xz = 1; yz = 0; zz = 0
-               
-            # Wait, consistent transformation is crucial.
-            # Only Columns are vertical.
-            # Most columns are vertical.
-            # Let's stick to a robust simple logic.
-            # Local y' = Global Y (projected)
-            # if vertical, Local y' = Global Y?
-            
-            # Revisit standard:
-            # X' = axis. 
-            # If vertical, Y' = Global -X?
+            # Vertical element (Parallel to Z-axis)
+            # x' = element axis direction
+            # 
+            # RIGHT-HAND RULE: x' × y' = z'
+            # 
+            # For upward column (cz > 0): x' = (0, 0, 1)
+            #   Choose y' = Global X = (1, 0, 0)
+            #   Then z' = x' × y' = (0,0,1) × (1,0,0) = (0*0-1*0, 1*1-0*0, 0*0-0*1) = (0, 1, 0) = Global Y ✓
+            #
+            # For downward column (cz < 0): x' = (0, 0, -1)
+            #   Choose y' = Global X = (1, 0, 0)  
+            #   Then z' = x' × y' = (0,0,-1) × (1,0,0) = (0*0-(-1)*0, (-1)*1-0*0, 0*0-0*1) = (0, -1, 0) = Global -Y
             
             if cz > 0:
-                xy = -1; yy = 0; zy = 0
-                xz = 0; yz = 1; zz = 0
+                # x' = (0, 0, 1), y' = (1, 0, 0), z' = (0, 1, 0)
+                xy = 1; yy = 0; zy = 0   # y' = Global X
+                xz = 0; yz = 1; zz = 0   # z' = Global Y
             else:
-                xy = 1; yy = 0; zy = 0
-                xz = 0; yz = 1; zz = 0
+                # x' = (0, 0, -1), y' = (1, 0, 0), z' = (0, -1, 0)
+                xy = 1; yy = 0; zy = 0   # y' = Global X
+                xz = 0; yz = -1; zz = 0  # z' = Global -Y
                 
         # T_node = [cx cy cz]
         #          [xy yy zy]
@@ -322,40 +303,28 @@ class BeamColumn3D(Element3D):
         k[11,1] = r2; k[11,5] = k21; k[11,7] = -r2; k[11,11] = k22
         
         # Bending Y -> Forces in Z (2,8), Moments in Y (4,10)
-        # Note: Positive My usually causes Tension in +Z?
-        # Standard Beam derivation:
-        # d^2z/dx^2 = -My / EIy ?
-        # Signs are tricky.
-        # Let's assume standard stiffness structure but verify indices.
-        # Condensation matrix k_cond_y works on [My_i, My_j] and [Theta_y_i, Theta_y_j]
+        # Sign convention: Must be consistent with Z-bending (rows 1,5,7,11)
+        # 
+        # For Z-bending: Shear-Rotation coupling is POSITIVE (k[1,5] = r1)
+        # For Y-bending: Must follow the SAME sign pattern
+        #
+        # Standard 3D beam element convention:
+        # - Positive Fz_i with positive theta_y_i relationship
+        # - The coupling follows: V = (M_i + M_j) / L (with appropriate signs)
         
         ky11 = k_cond_y[0,0]; ky12 = k_cond_y[0,1]
         ky21 = k_cond_y[1,0]; ky22 = k_cond_y[1,1]
         
         ry1 = (ky11 + ky21)/L; ry2 = (ky12 + ky22)/L; ry3 = (ky11+ky12+ky21+ky22)/L**2
         
-        # IMPORTANT: Sign convention for Y-bending
-        # Typically Fz and My.
-        # If we use standard matrix, Fz corresponds to "v" and My to "theta".
-        # But My vector is opposite to curvature?
-        # Standard: [ 12EI/L^3   -6EI/L^2 ... ] for Fz, My
-        #           [ -6EI/L^2    4EI/L   ... ]
-        # Note the negative sign on mixed term.
-        # The condensed k derived above assumes Positive Moment -> Positive Rotation.
-        # If My follows right hand rule, positive My is Rotation about +Y.
-        # Beam Z-deflection correlates with -Rotation Y slope?
-        # Let's use the signs from the `elastic` method I wrote earlier:
-        # k[2, 4] = -b. (Fz, My).
-        # So mixed terms should be negative.
-        
-        # Row 2 (Fz_i)
-        k[2,2] = ry3;  k[2,4] = -ry1;   k[2,8] = -ry3;  k[2,10] = -ry2 
-        # Row 4 (My_i)
-        k[4,2] = -ry1; k[4,4] = ky11;   k[4,8] = ry1;   k[4,10] = ky12
+        # Row 2 (Fz_i) - FIXED: Same sign pattern as Z-bending
+        k[2,2] = ry3;   k[2,4] = ry1;    k[2,8] = -ry3;  k[2,10] = ry2 
+        # Row 4 (My_i) - FIXED: Symmetric with row 2
+        k[4,2] = ry1;   k[4,4] = ky11;   k[4,8] = -ry1;  k[4,10] = ky12
         # Row 8 (Fz_j)
-        k[8,2] = -ry3; k[8,4] = ry1;    k[8,8] = ry3;   k[8,10] = ry2
+        k[8,2] = -ry3;  k[8,4] = -ry1;   k[8,8] = ry3;   k[8,10] = -ry2
         # Row 10 (My_j)
-        k[10,2] = -ry2; k[10,4] = ky21; k[10,8] = ry2;  k[10,10] = ky22
+        k[10,2] = ry2;  k[10,4] = ky21;  k[10,8] = -ry2; k[10,10] = ky22
         
         return k
 
@@ -379,10 +348,25 @@ class BeamColumn3D(Element3D):
         du_local = T @ u_ele_g
         L = self.get_length()
         
-        # 1. Update Axial (Elastic)
+        # 1. Update Axial with TENSION CUTOFF for concrete
+        # Concrete has very low tensile strength (typically ~10% of compressive)
+        # Without cutoff, columns act like infinite rubber bands
         du_x = du_local[6] - du_local[0]
-        dN = (self.E * self.A / L) * du_x
-        self.trial_N = self.current_N + dN
+        k_axial = self.E * self.A / L
+        dN = k_axial * du_x
+        trial_N = self.current_N + dN
+        
+        # Tension cutoff: Limit tensile force to ~10% of yield capacity
+        # This prevents unrealistic "pull-back" forces when building tries to lift
+        max_tension = 0.1 * self.E * self.A * 0.002  # ~0.2% strain limit for tension
+        if trial_N > max_tension:
+            # In tension beyond capacity - force is limited
+            self.trial_N = max_tension
+            # Reduce axial stiffness for tensioned elements
+            self._axial_softened = True
+        else:
+            self.trial_N = trial_N
+            self._axial_softened = False
         
         # 2. Update Torsion (Elastic)
         d_theta_x = du_local[9] - du_local[3]
@@ -458,24 +442,26 @@ class BeamColumn3D(Element3D):
         
         # 5. Assemble Global Force Vector
         # Reconstruct Shears from moment equilibrium
-        # For Z-bending: Vy = -(Mz_i + Mz_j) / L
+        # Sign convention must match stiffness matrix
+        # For Z-bending: Vy = -(Mz_i + Mz_j) / L (moments create shear)
         Vy = -(mz_i + mz_j) / L
-        # For Y-bending: Vz = -(My_i + My_j) / L (consistent with stiffness matrix signs)
-        Vz = -(my_i + my_j) / L
+        # For Y-bending: Vz follows same pattern as Vy
+        # With corrected stiffness signs, use consistent shear calculation
+        Vz = (my_i + my_j) / L  # Positive coupling consistent with k[2,4]=+ry1
         
         # Local Forces 12-vector
         f_loc = np.zeros(12)
         f_loc[0] = -self.trial_N
         f_loc[6] = self.trial_N
         
-        f_loc[3] = -T_trial # ? Torsion equilibrium
+        f_loc[3] = -T_trial # Torsion equilibrium
         f_loc[9] = T_trial
         
         # Y-Shear / Z-Moment
         f_loc[1] = Vy; f_loc[7] = -Vy
         f_loc[5] = mz_i; f_loc[11] = mz_j
         
-        # Z-Shear / Y-Moment
+        # Z-Shear / Y-Moment  
         f_loc[2] = Vz; f_loc[8] = -Vz
         f_loc[4] = my_i; f_loc[10] = my_j
         

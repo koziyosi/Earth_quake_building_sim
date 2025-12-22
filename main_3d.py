@@ -31,9 +31,20 @@ def run_3d_simulation(duration=5.0, max_acc=400.0, dt=0.005, callback=None,
                             'high_rise_killer', 'fling_step', 'distant_long_period')
     """
     # Fast mode uses larger time step for ~4x speedup
+    # However, for strong earthquakes, large dt causes numerical instability
     if fast_mode:
-        dt = 0.02  # 4x larger than default
-        print("Fast mode enabled: dt=0.02s (4x speedup)")
+        if max_acc > 800:
+            # Strong earthquake: reduce dt for stability during nonlinear response
+            dt = 0.01
+            print(f"Warning: High acceleration ({max_acc} gal) detected.")
+            print("Fast mode adjusted: dt=0.01s (2x speedup) for numerical stability.")
+        elif max_acc > 500:
+            # Moderate-strong: use intermediate dt
+            dt = 0.015
+            print(f"Fast mode adjusted for {max_acc} gal: dt=0.015s (3x speedup)")
+        else:
+            dt = 0.02  # 4x larger than default
+            print("Fast mode enabled: dt=0.02s (4x speedup)")
     
     # --- 1. Model Definition (3D Frame) ---
     if layout:
@@ -159,6 +170,14 @@ def run_3d_simulation(duration=5.0, max_acc=400.0, dt=0.005, callback=None,
     
     # Adaptive damping based on building height for numerical stability
     max_z = max(n.z for n in nodes) if nodes else 10.0
+    
+    # Enable P-Delta for tall buildings where geometric effects are significant
+    if max_z > 40:
+        solver.p_delta_enabled = True
+        print(f"P-Delta effects enabled for {max_z:.1f}m building")
+    else:
+        solver.p_delta_enabled = False
+    
     if max_z <= 40:
         damping_ratio = 0.05  # 5% for low-rise
     elif max_z <= 100:

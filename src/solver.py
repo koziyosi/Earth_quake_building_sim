@@ -398,7 +398,16 @@ class NewmarkBetaSolver:
             # 1. Assemble Stiffness - Modified Newton: only on first iteration
             if k == 0:
                 self.assemble_stiffness()
-                K_hat = self.K + a1 * self.C + a0 * self.M
+                
+                # Include P-Delta effect if enabled
+                if getattr(self, 'p_delta_enabled', False):
+                    # Assemble geometric stiffness based on current displacement
+                    self.assemble_geometric_stiffness(self.u + delta_u_total)
+                    K_total = self.K + self.K_geo
+                else:
+                    K_total = self.K
+                
+                K_hat = K_total + a1 * self.C + a0 * self.M
             # Reuse K_hat from first iteration for subsequent iterations
             
             
