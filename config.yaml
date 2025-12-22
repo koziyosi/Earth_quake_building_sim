@@ -1,0 +1,35 @@
+# EarthQuake Building Sim Configuration
+
+simulation:
+  # Default simulation parameters
+  duration: 5.0        # seconds
+  dt: 0.01             # time step (seconds)
+  max_acc: 400.0       # maximum acceleration (gal)
+
+building:
+  # Default building parameters
+  floors: 3
+  span_x: 6.0          # meters
+  span_y: 6.0          # meters
+  story_height: 3.5    # meters
+
+materials:
+  concrete:
+    E: 2.5e10          # Young's modulus (N/m²)
+    G: 1.0e10          # Shear modulus (N/m²)
+  
+damping:
+  # Rayleigh damping parameters
+  omega1: 10.0         # rad/s (first mode)
+  omega2: 50.0         # rad/s (second mode)
+  zeta: 0.05           # damping ratio
+
+output:
+  gif_fps: 20
+  gif_dpi: 60
+  animation_skip: 5    # frame skip for performance
+
+logging:
+  level: INFO          # DEBUG, INFO, WARNING, ERROR
+  file: simulation.log
+  console: true
