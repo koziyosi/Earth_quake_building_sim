@@ -21,6 +21,7 @@ from .property_inspector import PropertyInspectorPanel
 from .viewer_3d_enhanced import Building3DViewer, DamageColorLegend
 from .section_database import SECTION_DB
 from .material_library import MATERIAL_LIB
+from .gui_properties import open_properties_editor
 
 import main as sim2d
 import main_3d as sim3d
@@ -302,6 +303,12 @@ class EarthquakeSimGUI:
         )
         self.property_inspector.pack(fill=tk.BOTH, expand=True)
         
+        # Button to open detailed Properties Editor
+        props_btn_frame = ttk.Frame(self.property_tab)
+        props_btn_frame.pack(fill=tk.X, pady=10, padx=10)
+        ttk.Button(props_btn_frame, text="詳細エディタを開く / Open Properties Editor",
+                   command=self.open_properties_editor).pack(fill=tk.X)
+        
         # Tab 4: Export
         self.export_tab = ttk.Frame(self.vis_tabs)
         self.vis_tabs.add(self.export_tab, text='Export')
@@ -437,6 +444,18 @@ class EarthquakeSimGUI:
         elif property_name == 'material':
             # Update material in layout
             pass
+    
+    def open_properties_editor(self):
+        """Open the detailed Properties Editor dialog."""
+        def on_save(layout, analysis_settings):
+            logger.info("Properties saved from editor")
+            # Store analysis settings for use in simulation
+            self.analysis_settings = analysis_settings
+            # Refresh the layout editor if needed
+            if hasattr(self, 'layout_editor'):
+                self.layout_editor.refresh_ui()
+        
+        open_properties_editor(self.root, self.layout, on_save_callback=on_save)
         
     def on_model_change(self, event=None):
         val = self.model_var.get()

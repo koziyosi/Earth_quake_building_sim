@@ -275,12 +275,15 @@ class Takeda(Hysteresis):
             if (self.f_reversal > 0 and self.trial_force < 0) or \
                (self.f_reversal < 0 and self.trial_force > 0):
                 # Crossed origin - transition to reloading toward opposite peak
+                # But DON'T recalculate force here - let next iteration handle it
+                # This prevents double-calculation in the same call
                 if moving_positive:
                     self.state = self.STATE_LOADING_POS
                 else:
                     self.state = self.STATE_LOADING_NEG
-                    
-        if self.state == self.STATE_LOADING_POS:
+            # Note: Force already calculated above, no need to recalculate
+            
+        elif self.state == self.STATE_LOADING_POS:
             # RELOADING toward positive peak
             # Draw line from origin (or near it) to positive peak
             target_u = d_max

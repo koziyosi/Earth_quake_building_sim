@@ -39,6 +39,10 @@ class NewmarkBetaSolver:
         # Internal force tracking (for Newton-Raphson)
         self.F_int_prev = np.zeros(self.ndof)
         
+        # P-Delta (geometric stiffness) - initialize here to avoid AttributeError
+        self.p_delta_enabled = False
+        self.K_geo = np.zeros((self.ndof, self.ndof))
+        
         # Influence vector for ground motion (assuming X-direction input)
         self.iota = np.zeros(self.ndof)
         for node in self.nodes:
@@ -142,24 +146,17 @@ class NewmarkBetaSolver:
     def set_rayleigh_damping(self, omega1, omega2, zeta=0.05):
         """
         Sets C = a0*M + a1*K_initial
+        
+        Solves the system:
+        [1/w1 w1; 1/w2 w2] * [a0; a1] = [2*zeta; 2*zeta]
+        to find a0 and a1 such that damping ratio = zeta at frequencies omega1 and omega2.
         """
-        # Solving:
-        # 0.5 * (a0/w + a1*w) = zeta
-        # a0 + a1*w^2 = 2*zeta*w
-        
-        det = omega2**2 - omega1**2
-        a0 = 2*zeta*omega1*omega2*(omega2 - omega1) / det
-        a1 = 2*zeta*(omega2 - omega1) / det
-        
-        # Simpler approximation if w1, w2 close or standard formula:
-        # [1/w1 w1; 1/w2 w2] * [a0; a1] = [2*zeta; 2*zeta]
-        
         mat = np.array([[1/omega1, omega1], [1/omega2, omega2]])
         vec = np.array([2*zeta, 2*zeta])
         coeffs = np.linalg.solve(mat, vec)
         a0, a1 = coeffs[0], coeffs[1]
         
-        self.assemble_stiffness() # Ensure K is built
+        self.assemble_stiffness()  # Ensure K is built
         self.C = a0 * self.M + a1 * self.K
         
         # Add explicit damping
