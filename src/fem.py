@@ -168,8 +168,8 @@ class BeamColumn2D(Element2D):
         f_elastic = f_const * np.array([[2.0, -1.0], [-1.0, 2.0]])
         
         # Spring flexibilities
-        k_s_i = self.spring_i.stiffness if self.spring_i else float('inf')
-        k_s_j = self.spring_j.stiffness if self.spring_j else float('inf')
+        k_s_i = self.spring_i.tangent if self.spring_i else float('inf')
+        k_s_j = self.spring_j.tangent if self.spring_j else float('inf')
         
         f_s_i = 1.0 / k_s_i if k_s_i > 1e-9 else 1e9 # High flexibility if stiffness is 0
         f_s_j = 1.0 / k_s_j if k_s_j > 1e-9 else 1e9

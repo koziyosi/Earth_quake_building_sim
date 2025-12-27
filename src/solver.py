@@ -374,21 +374,25 @@ class NewmarkBetaSolver:
         # We need to assemble Tangent K at every iteration (or Modified Newton)
         
         # Divergence detection thresholds - building height and dt dependent
-        # Calculate building height from nodes
-        max_z = max(n.z for n in self.nodes) if self.nodes else 100.0
+        # Calculate building height from nodes (Check Z and Y for 2D/3D compatibility)
+        max_height = 100.0
+        if self.nodes:
+            max_z = max(n.z for n in self.nodes)
+            max_y = max(n.y for n in self.nodes)
+            max_height = max(max_z, max_y)
+            if max_height < 0.1: max_height = 10.0 # Default if flat
+
         # Step displacement limit: scales with dt and building height
         # Base: 1% drift for dt=0.005, scale proportionally
         dt_scale = dt / 0.005  # 1.0 for normal, 4.0 for fast mode
         # For small buildings (<10m): use 2% of height per step
         # For larger buildings: use 1% of height per step
-        if max_z < 10.0:
-            MAX_DISP_STEP = max(0.02 * max_z * dt_scale, 0.01)  # Min 1cm for tiny structures
+        if max_height < 10.0:
+            MAX_DISP_STEP = max(0.02 * max_height * dt_scale, 0.01)  # Min 1cm for tiny structures
         else:
-            MAX_DISP_STEP = 0.01 * max_z * dt_scale
+            MAX_DISP_STEP = 0.01 * max_height * dt_scale
         # Cap at reasonable maximum to prevent extreme values
         MAX_DISP_STEP = min(MAX_DISP_STEP, 5.0)
-        # Total accumulated displacement limit: realistic building deformation
-        MAX_DISP_TOTAL = min(20.0, 0.05 * max_z)  # 5% of building height max
         MAX_ITER_NO_CONVERGE = max_iter
         
         for k in range(max_iter):
@@ -415,9 +419,15 @@ class NewmarkBetaSolver:
             # Let's sum them.
             F_int_increment = np.zeros(self.ndof)
             for elem in self.elements:
-                f_el = elem.update_state(delta_u_total)
-                # Map to global F_int
+                # Extract element DOFs
                 indices = elem.get_element_dof_indices()
+                d_u_el = np.zeros(len(indices))
+                for i, idx in enumerate(indices):
+                    if idx != -1:
+                        d_u_el[i] = delta_u_total[idx]
+
+                f_el = elem.update_state(d_u_el)
+                # Map to global F_int
                 for i, idx in enumerate(indices):
                     if idx != -1:
                         F_int_increment[idx] += f_el[i]
@@ -518,7 +528,7 @@ class NewmarkBetaSolver:
             self.a += d_a
         
         # Apply total displacement limit to prevent unbounded drift
-        MAX_TOTAL_DISP = min(50.0, 0.1 * max_z)  # 10% of building height or 50m max
+        MAX_TOTAL_DISP = min(50.0, 0.1 * max_height)  # 10% of building height or 50m max
         if np.max(np.abs(self.u)) > MAX_TOTAL_DISP:
             # Scale down all displacements to limit
             scale_factor = MAX_TOTAL_DISP / np.max(np.abs(self.u))
@@ -532,8 +542,13 @@ class NewmarkBetaSolver:
         # Safest: re-calc.
         F_int_final = np.zeros(self.ndof)
         for elem in self.elements:
-            f_el = elem.update_state(delta_u_total)
             indices = elem.get_element_dof_indices()
+            d_u_el = np.zeros(len(indices))
+            for i, idx in enumerate(indices):
+                if idx != -1:
+                    d_u_el[i] = delta_u_total[idx]
+
+            f_el = elem.update_state(d_u_el)
             for i, idx in enumerate(indices):
                 if idx != -1:
                     F_int_final[idx] += f_el[i]

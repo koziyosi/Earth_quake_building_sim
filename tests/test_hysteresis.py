@@ -27,26 +27,22 @@ def test_hysteresis():
     bi_force = []
     bi_disp = []
     
-    d_prev = 0
     for d in disp_history:
-        delta = d - d_prev
-        f, k = bi_model.update(delta)
+        f, k = bi_model.set_trial_displacement(d)
+        bi_model.commit()
         bi_force.append(f)
         bi_disp.append(d)
-        d_prev = d
         
     # Test Takeda/Clough
     tk_model = Takeda(k0, fy, r)
     tk_force = []
     tk_disp = []
     
-    d_prev = 0
     for d in disp_history:
-        delta = d - d_prev
-        f, k = tk_model.update(delta)
+        f, k = tk_model.set_trial_displacement(d)
+        tk_model.commit()
         tk_force.append(f)
         tk_disp.append(d)
-        d_prev = d
         
     # Plot
     plt.figure(figsize=(12, 5))

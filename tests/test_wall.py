@@ -31,19 +31,20 @@ def test_wall_stiffness():
     
     F = np.zeros(6)
     F_apply = 1000.0 # N
-    # Apply force in Global X (Lateral) -> Index 0 in partitioned vector
-    # In Local system: Local x is Global Y. Local y is Global -X.
-    # So Force Global X is Force Local -Y.
-    # We are testing bending about Local Z (Strong axis? Or Weak?)
-    # Init: I_strong=Iz, I_weak=Iy.
-    # Iz (Strong) corresponds to bending in local xy plane (Shear in local y).
-    # Since we push in Global X -> Local Y, this engages Strong Axis (Iz).
     
-    F[0] = F_apply 
+    # We want to test Strong Axis Bending (Iz).
+    # Based on Element3D.get_transformation_matrix for a Vertical Element:
+    # Local Z corresponds to Global X. (Bending about Local Z is "In-Plane" if we defined it that way?)
+    # Wait, Bending about Strong Axis (Iz) usually resists shear in Local Y.
+    # Local Y corresponds to Global Z (for Vertical element, see Element3D logic: z'=X, y'=Z).
+    # So to engage Local Y (Strong Axis Shear), we must push in Global Z.
+
+    # Push in Global Z (Index 2 in the 6-DOF node vector)
+    F[2] = F_apply
     
     u = np.linalg.solve(K_ff, F)
     
-    disp = u[0]
+    disp = u[2]
     
     # Theoretical Timoshenko Beam Deflection
     # D = PL^3/3EI + PL/GAs
