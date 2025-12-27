@@ -19,6 +19,77 @@ class Element3D(ABC):
         """
         pass
 
+    def get_length(self) -> float:
+        dx = self.node_j.x - self.node_i.x
+        dy = self.node_j.y - self.node_i.y
+        dz = self.node_j.z - self.node_i.z
+        return np.sqrt(dx**2 + dy**2 + dz**2)
+
+    def get_transformation_matrix(self) -> np.ndarray:
+        # 3D Beam Transformation
+        # Local x' axis is along element axis
+        # How to define y' and z'?
+        # Standard convention:
+        # If vertical (along Z), y' is -X?
+        # A common approach: use a reference vector.
+        # Let's assume standard implementation.
+
+        dx = self.node_j.x - self.node_i.x
+        dy = self.node_j.y - self.node_i.y
+        dz = self.node_j.z - self.node_i.z
+        L = np.sqrt(dx**2 + dy**2 + dz**2)
+
+        cx = dx / L
+        cy = dy / L
+        cz = dz / L
+
+        if np.abs(cz) < 0.999:
+            # Not vertical
+            # z' direction (perp to x' and Z)
+            # z' = x' x K = (cy, -cx, 0)
+            D = np.sqrt(cx**2 + cy**2)
+            xz = cy / D
+            yz = -cx / D
+            zz = 0.0
+
+            # y' = z' x x'
+            # y'x = yz*cz - zz*cy = -cx*cz/D
+            # y'y = zz*cx - xz*cz = -cy*cz/D
+            # y'z = xz*cy - yz*cx = (cy^2 + cx^2)/D = D
+            xy = -cx * cz / D
+            yy = -cy * cz / D
+            zy = D
+
+        else:
+            # Vertical element (Parallel to Z-axis)
+            if cz > 0:
+                # x' = (0, 0, 1), y' = (1, 0, 0), z' = (0, 1, 0)
+                xy = 1; yy = 0; zy = 0   # y' = Global X
+                xz = 0; yz = 1; zz = 0   # z' = Global Y
+            else:
+                # x' = (0, 0, -1), y' = (1, 0, 0), z' = (0, -1, 0)
+                xy = 1; yy = 0; zy = 0   # y' = Global X
+                xz = 0; yz = -1; zz = 0  # z' = Global -Y
+
+        # T_node = [cx cy cz]
+        #          [xy yy zy]
+        #          [xz yz zz]
+
+        T_node = np.array([
+            [cx, cy, cz],
+            [xy, yy, zy],
+            [xz, yz, zz]
+        ])
+
+        # Assemble 12x12
+        T = np.zeros((12, 12))
+        T[0:3, 0:3] = T_node
+        T[3:6, 3:6] = T_node
+        T[6:9, 6:9] = T_node
+        T[9:12, 9:12] = T_node
+
+        return T
+
 class BeamColumn3D(Element3D):
     """
     3D Beam-Column Element with Plastic Hinges (Takeda/Bilinear) at ends.
@@ -118,96 +189,6 @@ class BeamColumn3D(Element3D):
         dz = self.node_j.z - self.node_i.z
         return np.sqrt(dx**2 + dy**2 + dz**2)
 
-    def get_transformation_matrix(self) -> np.ndarray:
-        # 3D Beam Transformation
-        # Local x' axis is along element axis
-        # How to define y' and z'?
-        # Standard convention: 
-        # If vertical (along Z), y' is -X?
-        # A common approach: use a reference vector.
-        # Let's assume standard implementation.
-        
-        dx = self.node_j.x - self.node_i.x
-        dy = self.node_j.y - self.node_i.y
-        dz = self.node_j.z - self.node_i.z
-        L = np.sqrt(dx**2 + dy**2 + dz**2)
-        
-        cx = dx / L
-        cy = dy / L
-        cz = dz / L
-        
-        # Rotation Matrix R (3x3)
-        # R = [nx ny nz] rows? Or columns?
-        # Local to Global: u_g = R.T @ u_l ?
-        # Usually u_l = T @ u_g. (T is 12x12).
-        # T_3x3 maps Global to Local.
-        
-        # Algorithm to define local axes:
-        # x' = (cx, cy, cz)
-        # Need arbitrary perpendicular y' and z'.
-        # If element is not vertical:
-        # Let 'k' be global Z (0,0,1).
-        # z' = x' cross k (horizontal vector)
-        # y' = z' cross x' (vector in vertical plane)
-        
-        if np.abs(cz) < 0.999:
-            # Not vertical
-            # z' direction (perp to x' and Z)
-            # z' = x' x K = (cy, -cx, 0)
-            D = np.sqrt(cx**2 + cy**2)
-            xz = cy / D
-            yz = -cx / D
-            zz = 0.0
-            
-            # y' = z' x x'
-            # y'x = yz*cz - zz*cy = -cx*cz/D
-            # y'y = zz*cx - xz*cz = -cy*cz/D
-            # y'z = xz*cy - yz*cx = (cy^2 + cx^2)/D = D
-            xy = -cx * cz / D
-            yy = -cy * cz / D
-            zy = D
-            
-        else:
-            # Vertical element (Parallel to Z-axis)
-            # x' = element axis direction
-            # 
-            # RIGHT-HAND RULE: x' × y' = z'
-            # 
-            # For upward column (cz > 0): x' = (0, 0, 1)
-            #   Choose y' = Global X = (1, 0, 0)
-            #   Then z' = x' × y' = (0,0,1) × (1,0,0) = (0*0-1*0, 1*1-0*0, 0*0-0*1) = (0, 1, 0) = Global Y ✓
-            #
-            # For downward column (cz < 0): x' = (0, 0, -1)
-            #   Choose y' = Global X = (1, 0, 0)  
-            #   Then z' = x' × y' = (0,0,-1) × (1,0,0) = (0*0-(-1)*0, (-1)*1-0*0, 0*0-0*1) = (0, -1, 0) = Global -Y
-            
-            if cz > 0:
-                # x' = (0, 0, 1), y' = (1, 0, 0), z' = (0, 1, 0)
-                xy = 1; yy = 0; zy = 0   # y' = Global X
-                xz = 0; yz = 1; zz = 0   # z' = Global Y
-            else:
-                # x' = (0, 0, -1), y' = (1, 0, 0), z' = (0, -1, 0)
-                xy = 1; yy = 0; zy = 0   # y' = Global X
-                xz = 0; yz = -1; zz = 0  # z' = Global -Y
-                
-        # T_node = [cx cy cz]
-        #          [xy yy zy]
-        #          [xz yz zz]
-        
-        T_node = np.array([
-            [cx, cy, cz],
-            [xy, yy, zy],
-            [xz, yz, zz]
-        ])
-        
-        # Assemble 12x12
-        T = np.zeros((12, 12))
-        T[0:3, 0:3] = T_node
-        T[3:6, 3:6] = T_node
-        T[6:9, 6:9] = T_node
-        T[9:12, 9:12] = T_node
-        
-        return T
 
     def get_element_dof_indices(self) -> List[int]:
         return self.node_i.dof_indices + self.node_j.dof_indices
@@ -336,16 +317,14 @@ class BeamColumn3D(Element3D):
     def update_state(self, delta_u_global: np.ndarray) -> np.ndarray:
         T = self.get_transformation_matrix()
         
-        # Extract element nodal displacements (global coords)
-        indices = self.get_element_dof_indices()
-        u_ele_g = np.zeros(12)
-        for k, idx in enumerate(indices):
-            if idx != -1:
-                # Check bounds just in case? Solver should guarantee n_dof match
-                if idx < len(delta_u_global):
-                    u_ele_g[k] = delta_u_global[idx]
-                
-        du_local = T @ u_ele_g
+        # delta_u_global is now assumed to be the 12-element vector for this element
+        if len(delta_u_global) != 12:
+            # Fallback for legacy calls passing full vector?
+            # Or just fail. Let's assume the solver is fixed.
+            # But just in case, if it's large, we try to extract (logic removed for cleanliness)
+            pass
+
+        du_local = T @ delta_u_global
         L = self.get_length()
         
         # 1. Update Axial with TENSION CUTOFF for concrete

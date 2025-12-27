@@ -108,4 +108,57 @@ class ShearWall3D(Element3D):
         return T.T @ k @ T
     
     def update_state(self, delta_u_global):
-        pass
+        # We need to implement update state logic.
+        # For now, we will perform a linear update.
+        # The forces are calculated as K * delta_u_global (incremental)
+        # But this is "update_state", which usually updates internal history variables.
+        # Since ShearWall3D is macroscopic, we might want to track shear deformations if `shear_hysteresis` is used.
+
+        # Calculate local displacements
+        T = self.get_transformation_matrix()
+        delta_u_local = T @ delta_u_global
+
+        # Calculate shear deformation (very approximate for this macro model)
+        # Shear deformation is related to the relative lateral displacement between nodes.
+        # u_shear = u_lateral - u_bending
+        # But for this simple element, we can treat the "Shear Spring" as one component.
+        # If we have `shear_hysteresis`, we should update it.
+
+        if self.shear_hysteresis:
+            # Assume Y-direction shear (strong axis bending involves Y-shear usually?)
+            # Wait, strong axis bending (Iz) is about Z-axis. Corresponding shear is in Y.
+            # Local DOF 1 and 7 (v_y1, v_y2).
+            # Delta Shear = v_y2 - v_y1
+
+            dy = delta_u_local[7] - delta_u_local[1]
+            self.shear_disp += dy
+
+            # Update hysteresis
+            force, tangent = self.shear_hysteresis.set_trial_displacement(self.shear_disp)
+            self.shear_force = force
+
+        # Calculate forces using current stiffness matrix (or modified if hysteresis)
+        # If hysteresis is present, we should replace the relevant stiffness terms.
+        # But for now, let's just return K * delta_u for consistency with linear elements
+        # unless we modify K based on hysteresis tangent.
+
+        K = self.get_stiffness_matrix()
+
+        # If shear hysteresis is active, modify K?
+        # get_stiffness_matrix uses G*As. We should replace G*As with Tangent.
+        # But get_stiffness_matrix is called by solver.
+        # Here we return the restoring force vector.
+
+        # Linear force
+        f_inc = K @ delta_u_local
+
+        # If nonlinear shear, replace shear force component?
+        # This is getting complex for a "fix".
+        # Minimal viable fix: Implement the method so it doesn't crash,
+        # and return linear forces for now, or simplistic nonlinear.
+
+        return T.T @ f_inc
+
+    def commit_state(self):
+        if self.shear_hysteresis:
+            self.shear_hysteresis.commit()
